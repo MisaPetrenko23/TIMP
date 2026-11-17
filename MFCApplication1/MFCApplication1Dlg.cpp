@@ -264,13 +264,13 @@ public:
     static std::string evaluateStrength(const CrackResult& result, size_t text_len) {
         constexpr double KEY_SPACE_ENTROPY = 4.700439718141092; // ~4.7 бит
         std::string assessment = "Оценка криптостойкости:\n";
-        assessment += std::format("  ├─ Пространство ключей: 26 (энтропия: {:.1f} бит)\n", KEY_SPACE_ENTROPY);
-        assessment += std::format("  ├─ Метрика соответствия английскому языку: {:.4f}\n", result.fitness_score);
-        assessment += "  ├─ Уязвимости: \n";
-        assessment += "  │   • Тривиальный полный перебор (brute-force)\n";
-        assessment += "  │   • Частотный анализ букв\n";
-        assessment += "  │   • Отсутствие диффузии и путаницы (по Шеннону)\n";
-        assessment += "  └─ Вывод: ";
+        assessment += std::format("  |-- Пространство ключей: 26 (энтропия: {:.1f} бит)\n", KEY_SPACE_ENTROPY);
+        assessment += std::format("  |-- Метрика соответствия английскому языку: {:.4f}\n", result.fitness_score);
+        assessment += "  |-- Уязвимости: \n";
+        assessment += "  |   * Тривиальный полный перебор (brute-force)\n";
+        assessment += "  |   * Частотный анализ букв\n";
+        assessment += "  |   * Отсутствие диффузии и путаницы (по Шеннону)\n";
+        assessment += "  \\-- Вывод: ";
 
         if (text_len < 10) {
             assessment += "КРИПТОСТОЙКОСТЬ НИЗКАЯ (мало данных для анализа, но шифр всё равно небезопасен)\n";
@@ -278,7 +278,7 @@ public:
         else {
             assessment += "КРИПТОСТОЙКОСТЬ КРАЙНЕ НИЗКАЯ. Шифр Цезаря не подходит для защиты данных.\n";
         }
-        assessment += "  ▶ Рекомендация: использовать AES-256, ChaCha20 или XChaCha20.";
+        assessment += "  -> Рекомендация: использовать AES-256, ChaCha20 или XChaCha20.";
         return assessment;
     }
 
@@ -412,6 +412,7 @@ std::string FindDatabaseFile() {
     std::vector<std::filesystem::path> candidates{
         exeDir / dbName,
         exeDir.parent_path() / dbName,
+        exeDir.parent_path().parent_path() / dbName, // файл БД лежит в папке проекта
         exeDir.parent_path() / L"MFCApplication1" / dbName,
         exeDir.parent_path().parent_path() / L"MFCApplication1" / L"x64" / L"Debug" / dbName,
         exeDir.parent_path().parent_path() / L"x64" / L"Debug" / dbName,

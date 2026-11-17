@@ -36,4 +36,5 @@ MFC-приложение (C++/Visual Studio) для шифрования по Ц
 
 Во время выполнения используется `fbclient.dll` из RedDatabase (установлена в `C:\Windows\system32`).
 
-> Файл БД не хранется в GitHub. Положите `CAESARCIPHERDB.FDB` рядом с exe перед запуском.
+> Файл `CAESARCIPHERDB.FDB` теперь лежит в репозитории: `MFCApplication1/CAESARCIPHERDB.FDB`.
+> При сборке он автоматически копируется в папку с exe (post-build event), поэтому вручную ничего копировать не нужно.
