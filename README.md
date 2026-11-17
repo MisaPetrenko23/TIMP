@@ -4,10 +4,15 @@ MFC-приложение (C++/Visual Studio) для шифрования по Ц
 
 ## Готовый запуск
 
-Готовая программа лежит в `bin/MFCApplication1.exe` (Release x64).  
-Просто запустите её — база `MFCApplication1/CAESARCIPHERDB.FDB` будет найдена автоматически.
+Скачайте всю папку `bin` и запустите `bin/MFCApplication1.exe` (Release x64).
 
-Для работы нужен установленный клиент RedDatabase/Firebird (`fbclient.dll`, обычно в `C:\Windows\system32`).
+Внутри `bin` уже лежит всё необходимое:
+
+- `CAESARCIPHERDB.FDB` — база;
+- `fbclient.dll` — клиент;
+- `firebird\` — встроенный движок RedDatabase/Firebird.
+
+Программа сама укажет переменную `FIREBIRD` на папку `bin\firebird`, поэтому RedDatabase не нужно устанавливать отдельно.
 
 ## Подключение к БД
 

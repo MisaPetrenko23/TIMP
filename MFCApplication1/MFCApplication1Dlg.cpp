@@ -428,12 +428,33 @@ std::string FindDatabaseFile() {
     return {};
 }
 
+// Если рядом с exe лежит папка firebird с встроенным движком — используем её.
+// Это позволяет запускать программу без установленного RedDatabase.
+void PrepareFirebirdEnvironment()
+{
+    wchar_t exePath[MAX_PATH]{};
+    const DWORD len = ::GetModuleFileNameW(nullptr, exePath, MAX_PATH);
+    if (len == 0 || len >= MAX_PATH) return;
+
+    const std::filesystem::path exeDir =
+        std::filesystem::path(exePath).parent_path();
+    const std::filesystem::path fbDir = exeDir / L"firebird";
+    std::error_code ec;
+
+    if (std::filesystem::exists(fbDir / L"plugins" / L"engine12.dll", ec)) {
+        ::SetEnvironmentVariableW(L"FIREBIRD", fbDir.c_str());
+    }
+}
+
 bool CMFCApplication1Dlg::ConnectDatabase()
 {
+    PrepareFirebirdEnvironment();
+
     const std::string dbPath = FindDatabaseFile();
     if (dbPath.empty())
     {
-        m_strDbStatus = _T("БД CAESARCIPHERDB.FDB не найдена рядом с программой");
+        m_strDbStatus = _T("БД CAESARCIPHERDB.FDB не найдена. "
+                           "Положите её в папку bin рядом с MFCApplication1.exe");
         return false;
     }
 
