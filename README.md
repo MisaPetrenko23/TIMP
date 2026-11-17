@@ -2,6 +2,13 @@
 
 MFC-приложение (C++/Visual Studio) для шифрования по Цезарю с подключением к базе **RedDatabase / Firebird**.
 
+## Готовый запуск
+
+Готовая программа лежит в `bin/MFCApplication1.exe` (Release x64).  
+Просто запустите её — база `MFCApplication1/CAESARCIPHERDB.FDB` будет найдена автоматически.
+
+Для работы нужен установленный клиент RedDatabase/Firebird (`fbclient.dll`, обычно в `C:\Windows\system32`).
+
 ## Подключение к БД
 
 Используется файл `CAESARCIPHERDB.FDB`. Программа ищет его:
