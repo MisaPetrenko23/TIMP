@@ -20,6 +20,9 @@
 #include <utility>
 #include <cctype>
 #include <cmath>
+#include <wincrypt.h>
+
+#pragma comment(lib, "Advapi32.lib")
 
 #ifdef _DEBUG
 #define new DEBUG_NEW
@@ -130,7 +133,10 @@ BOOL CMFCApplication1Dlg::OnInitDialog()
 	SetIcon(m_hIcon, TRUE);			// Крупный значок
 	SetIcon(m_hIcon, FALSE);		// Мелкий значок
 
-	// TODO: добавьте дополнительную инициализацию
+	// Подключаемся к RedDatabase / Firebird (CAESARCIPHERDB.FDB).
+	ConnectDatabase();
+	m_strEvaluation = m_strDbStatus;
+	UpdateData(FALSE);
 
 	return TRUE;  // возврат значения TRUE, если фокус не передан элементу управления
 }
@@ -328,12 +334,226 @@ std::string readFile(const std::filesystem::path& path) {
 // ============================================================================
 // Вспомогательные конвертеры CString <-> std::string (Unicode-сборка)
 // ============================================================================
+// CString (Unicode) <-> std::string (UTF-8) — база работает в UTF-8.
 inline std::string ToStdStr(const CString& str) {
-    // CString -> CStringA -> const char* -> std::string
-    return std::string(CStringA(str).GetString());
+    const std::wstring wide(str.GetString());
+    if (wide.empty()) return {};
+
+    const int size = ::WideCharToMultiByte(CP_UTF8, 0,
+        wide.data(), static_cast<int>(wide.size()),
+        nullptr, 0, nullptr, nullptr);
+    std::string result(static_cast<size_t>(size), '\0');
+    ::WideCharToMultiByte(CP_UTF8, 0,
+        wide.data(), static_cast<int>(wide.size()),
+        result.data(), size, nullptr, nullptr);
+    return result;
 }
 
-inline CString     ToCStr(const std::string& str) { return CStringW(str.c_str()); }
+inline CString ToCStr(const std::string& str) {
+    if (str.empty()) return CString();
+
+    const int size = ::MultiByteToWideChar(CP_UTF8, 0,
+        str.c_str(), static_cast<int>(str.size()),
+        nullptr, 0);
+    std::wstring wide(static_cast<size_t>(size), L'\0');
+    ::MultiByteToWideChar(CP_UTF8, 0,
+        str.c_str(), static_cast<int>(str.size()),
+        wide.data(), size);
+    return CString(wide.c_str());
+}
+
+// MD5 исходных байт файла — для поля SOURCEFILES.FILEHASH.
+std::string Md5Hex(const std::string& data) {
+    std::string result;
+    HCRYPTPROV prov = 0;
+    HCRYPTHASH hash = 0;
+
+    if (!::CryptAcquireContextW(&prov, nullptr, nullptr,
+        PROV_RSA_AES, CRYPT_VERIFYCONTEXT))
+        return result;
+
+    if (!::CryptCreateHash(prov, CALG_MD5, 0, 0, &hash)) {
+        ::CryptReleaseContext(prov, 0);
+        return result;
+    }
+
+    if (data.empty() ||
+        ::CryptHashData(hash,
+            reinterpret_cast<const BYTE*>(data.data()),
+            static_cast<DWORD>(data.size()), 0))
+    {
+        BYTE digest[16]{};
+        DWORD digestLen = sizeof(digest);
+        if (::CryptGetHashParam(hash, HP_HASHVAL, digest, &digestLen, 0)) {
+            static const char* hex = "0123456789abcdef";
+            result.reserve(32);
+            for (BYTE b : digest) {
+                result += hex[b >> 4];
+                result += hex[b & 0x0F];
+            }
+        }
+    }
+
+    if (hash) ::CryptDestroyHash(hash);
+    ::CryptReleaseContext(prov, 0);
+    return result;
+}
+
+// Ищет CAESARCIPHERDB.FDB рядом с EXE, в родительской папке
+// и в вложенной папке сборки x64\Debug.
+std::string FindDatabaseFile() {
+    wchar_t exePath[MAX_PATH]{};
+    const DWORD len = ::GetModuleFileNameW(nullptr, exePath, MAX_PATH);
+    if (len == 0 || len >= MAX_PATH) return {};
+
+    std::filesystem::path exeDir = std::filesystem::path(exePath).parent_path();
+    const wchar_t* dbName = L"CAESARCIPHERDB.FDB";
+
+    std::vector<std::filesystem::path> candidates{
+        exeDir / dbName,
+        exeDir.parent_path() / dbName,
+        exeDir.parent_path() / L"MFCApplication1" / dbName,
+        exeDir.parent_path().parent_path() / L"MFCApplication1" / L"x64" / L"Debug" / dbName,
+        exeDir.parent_path().parent_path() / L"x64" / L"Debug" / dbName,
+    };
+
+    for (const auto& p : candidates) {
+        std::error_code ec;
+        if (std::filesystem::exists(p, ec)) {
+            const auto u8 = std::filesystem::absolute(p, ec).u8string();
+            return std::string(reinterpret_cast<const char*>(u8.data()), u8.size());
+        }
+    }
+    return {};
+}
+
+bool CMFCApplication1Dlg::ConnectDatabase()
+{
+    const std::string dbPath = FindDatabaseFile();
+    if (dbPath.empty())
+    {
+        m_strDbStatus = _T("БД CAESARCIPHERDB.FDB не найдена рядом с программой");
+        return false;
+    }
+
+    std::string error;
+    if (!m_db.Connect(dbPath, "SYSDBA", "masterkey", error))
+    {
+        m_strDbStatus = ToCStr("БД не подключена: " + error);
+        return false;
+    }
+
+    int userId = 0;
+    if (!m_db.QueryInt("SELECT FIRST 1 ID FROM USERS ORDER BY ID", {}, userId, error))
+    {
+        userId = 1; // Петренко М.Р. — первый пользователь в БД
+    }
+    m_nUserId = userId;
+
+    m_strDbStatus = ToCStr("БД подключена: " + dbPath +
+                           "\nПользователь БД: ID=" + std::to_string(m_nUserId));
+    return true;
+}
+
+bool CMFCApplication1Dlg::EnsureFileRecord()
+{
+    if (!m_db.IsConnected()) return false;
+    if (m_nFileDbId != 0) return true;
+
+    std::string error;
+    int fileId = 0;
+    if (!m_db.QueryInt(
+        "SELECT CAST(GEN_ID(GEN_FILES_ID, 1) AS INTEGER) FROM RDB$DATABASE",
+        {}, fileId, error))
+    {
+        ShowDbError(error);
+        return false;
+    }
+
+    const std::string fileName = m_strFileNameUtf8.empty()
+        ? std::string("manual_input.txt") : m_strFileNameUtf8;
+    const std::string fileHash = m_strFileHashUtf8.empty()
+        ? Md5Hex(ToStdStr(m_strPlainText)) : m_strFileHashUtf8;
+    const int fileSize = m_nFileSize > 0
+        ? m_nFileSize : static_cast<int>(ToStdStr(m_strPlainText).size());
+
+    if (!m_db.Execute(
+        "INSERT INTO SOURCEFILES (ID, USERID, FILENAME, FILESIZE, FILEHASH) "
+        "VALUES (?, ?, ?, ?, ?)",
+        { fileId, m_nUserId, fileName, fileSize, fileHash }, error))
+    {
+        ShowDbError(error);
+        return false;
+    }
+
+    m_nFileDbId = fileId;
+    return true;
+}
+
+bool CMFCApplication1Dlg::LogOperation(const std::string& operationType,
+                                       int shift,
+                                       int foundShift,
+                                       double fitnessScore,
+                                       int textLength)
+{
+    if (!EnsureFileRecord()) return false;
+
+    std::string error;
+    int operationId = 0;
+    if (!m_db.QueryInt(
+        "SELECT CAST(GEN_ID(GEN_OPERATIONS_ID, 1) AS INTEGER) FROM RDB$DATABASE",
+        {}, operationId, error))
+    {
+        ShowDbError(error);
+        return false;
+    }
+
+    if (!m_db.Execute(
+        "INSERT INTO ENCRYPTIONOPERATIONS "
+        "(ID, FILEID, OPERATIONTYPE, SHIFTKEY, STATUS, OPERATIONDATE) "
+        "VALUES (?, ?, ?, ?, 'success', CURRENT_TIMESTAMP)",
+        { operationId, m_nFileDbId, operationType, shift }, error))
+    {
+        ShowDbError(error);
+        return false;
+    }
+
+    if (operationType == "crack" && foundShift >= 0)
+    {
+        int analysisId = 0;
+        if (!m_db.QueryInt(
+            "SELECT CAST(GEN_ID(GEN_ANALYSIS_ID, 1) AS INTEGER) FROM RDB$DATABASE",
+            {}, analysisId, error))
+        {
+            ShowDbError(error);
+            return false;
+        }
+
+        if (!m_db.Execute(
+            "INSERT INTO CRACKANALYSIS "
+            "(ID, OPERATIONID, FOUNDSHIFT, FITNESSSCORE, TEXTLENGTH) "
+            "VALUES (?, ?, ?, ?, ?)",
+            { analysisId, operationId, foundShift, fitnessScore, textLength }, error))
+        {
+            ShowDbError(error);
+            return false;
+        }
+    }
+
+    m_strDbStatus = ToCStr("Запись добавлена в БД (операция ID=" +
+                           std::to_string(operationId) + ")");
+    return true;
+}
+
+void CMFCApplication1Dlg::ShowDbError(const std::string& error)
+{
+    m_strDbStatus = ToCStr("Ошибка БД: " + error);
+    if (!m_bDbWarned)
+    {
+        AfxMessageBox(ToCStr("Не удалось записать в БД: " + error), MB_ICONWARNING);
+        m_bDbWarned = true;
+    }
+}
 
 void CMFCApplication1Dlg::OnBnClickedBtnOpen()
 {
@@ -347,11 +567,20 @@ void CMFCApplication1Dlg::OnBnClickedBtnOpen()
 			//std::string raw = readFile(std::filesystem::path(CStringA(m_strFilePath)));
             std::filesystem::path fsPath(m_strFilePath.GetString()); // Native wchar_t* для Windows
             std::string raw = readFile(fsPath);
+
+            // Метаданные файла для таблицы SOURCEFILES в БД.
+            const auto nameU8 = fsPath.filename().u8string();
+            m_strFileNameUtf8 = std::string(
+                reinterpret_cast<const char*>(nameU8.data()), nameU8.size());
+            m_nFileSize = static_cast<int>(raw.size());
+            m_strFileHashUtf8 = Md5Hex(raw);
+            m_nFileDbId = 0; // следующий файл — новая запись в БД
+
 			m_strPlainText = ToCStr(raw);
 			m_strCipherText.Empty();
 			m_strDecryptedText.Empty();
 			m_strCrackedText.Empty();
-			m_strEvaluation.Empty();
+			m_strEvaluation = m_strDbStatus;
 		}
 		catch (const std::exception& e) {
 			AfxMessageBox(CString(e.what()), MB_ICONERROR);
@@ -370,6 +599,9 @@ void CMFCApplication1Dlg::OnBnClickedBtnEncrypt()
         m_strCipherText = ToCStr(res);
         m_strDecryptedText.Empty();
         m_strCrackedText.Empty();
+
+        LogOperation("encrypt", m_nShift);
+        m_strEvaluation = m_strDbStatus;
     }
     catch (const std::exception& e) { AfxMessageBox(CString(e.what()), MB_ICONERROR); }
     UpdateData(FALSE);
@@ -383,6 +615,9 @@ void CMFCApplication1Dlg::OnBnClickedBtnDecrypt()
     try {
         std::string res = CaesarCipher::decrypt(ToStdStr(m_strCipherText), m_nShift);
         m_strDecryptedText = ToCStr(res);
+
+        LogOperation("decrypt", m_nShift);
+        m_strEvaluation = m_strDbStatus;
     }
     catch (const std::exception& e) { AfxMessageBox(CString(e.what()), MB_ICONERROR); }
     UpdateData(FALSE);
@@ -396,9 +631,13 @@ void CMFCApplication1Dlg::OnBnClickedBtnCrack()
     try {
         auto result = CaesarCracker::crack(ToStdStr(m_strCipherText));
         m_strCrackedText = ToCStr(result.plaintext);
+        const int textLength = static_cast<int>(ToStdStr(m_strPlainText).length());
         m_strEvaluation = ToCStr(
             CaesarCracker::evaluateStrength(result, ToStdStr(m_strPlainText).length())
         );
+
+        LogOperation("crack", 0, result.best_shift, result.fitness_score, textLength);
+        m_strEvaluation += _T("\n\n") + m_strDbStatus;
     }
     catch (const std::exception& e) { AfxMessageBox(CString(e.what()), MB_ICONERROR); }
     UpdateData(FALSE);

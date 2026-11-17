@@ -15,6 +15,9 @@
     </Filter>
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="FirebirdDb.h">
+      <Filter>Файлы заголовков</Filter>
+    </ClInclude>
     <ClInclude Include="MFCApplication1.h">
       <Filter>Файлы заголовков</Filter>
     </ClInclude>
@@ -35,6 +38,9 @@
     </ClInclude>
   </ItemGroup>
   <ItemGroup>
+    <ClCompile Include="FirebirdDb.cpp">
+      <Filter>Исходные файлы</Filter>
+    </ClCompile>
     <ClCompile Include="MFCApplication1.cpp">
       <Filter>Исходные файлы</Filter>
     </ClCompile>

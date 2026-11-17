@@ -4,6 +4,8 @@
 
 #pragma once
 
+#include "FirebirdDb.h"
+
 
 // Диалоговое окно CMFCApplication1Dlg
 class CMFCApplication1Dlg : public CDialog
@@ -43,4 +45,24 @@ public:
 	afx_msg void OnBnClickedBtnEncrypt();
 	afx_msg void OnBnClickedBtnDecrypt();
 	afx_msg void OnBnClickedBtnCrack();
+
+private:
+	// --- Подключение к RedDatabase / Firebird ---
+	bool ConnectDatabase();
+	bool EnsureFileRecord();
+	bool LogOperation(const std::string& operationType,
+	                  int shift,
+	                  int foundShift = -1,
+	                  double fitnessScore = 0.0,
+	                  int textLength = 0);
+	void ShowDbError(const std::string& error);
+
+	FirebirdDb m_db;
+	CString     m_strDbStatus;
+	int         m_nUserId{ 0 };
+	int         m_nFileDbId{ 0 };
+	int         m_nFileSize{ 0 };
+	std::string m_strFileNameUtf8;
+	std::string m_strFileHashUtf8;
+	bool        m_bDbWarned{ false };
 };
