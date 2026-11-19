@@ -73,6 +73,7 @@ CMFCApplication1Dlg::CMFCApplication1Dlg(CWnd* pParent /*=nullptr*/)
 	, m_strCipherText(_T(""))
 	, m_strCrackedText(_T(""))
 	, m_strFilePath(_T(""))
+	, m_strHistory(_T(""))
 	, m_nShift(69)
 	, m_strEvaluation(_T(""))
 {
@@ -87,6 +88,7 @@ void CMFCApplication1Dlg::DoDataExchange(CDataExchange* pDX)
 	DDX_Text(pDX, IDC_EDIT_CIPHER, m_strCipherText);
 	DDX_Text(pDX, IDC_EDIT_CRACKED, m_strCrackedText);
 	DDX_Text(pDX, IDC_EDIT_FILE_PATH, m_strFilePath);
+	DDX_Text(pDX, IDC_EDIT_HISTORY, m_strHistory);
 	DDX_Text(pDX, IDC_EDIT_SHIFT, m_nShift);
 	DDX_Text(pDX, IDC_STATIC_EVAL, m_strEvaluation);
 }
@@ -99,6 +101,7 @@ BEGIN_MESSAGE_MAP(CMFCApplication1Dlg, CDialog)
     ON_BN_CLICKED(IDC_BTN_ENCRYPT, &CMFCApplication1Dlg::OnBnClickedBtnEncrypt)
     ON_BN_CLICKED(IDC_BTN_DECRYPT, &CMFCApplication1Dlg::OnBnClickedBtnDecrypt)
     ON_BN_CLICKED(IDC_BTN_CRACK, &CMFCApplication1Dlg::OnBnClickedBtnCrack)
+    ON_BN_CLICKED(IDC_BTN_HISTORY, &CMFCApplication1Dlg::OnBnClickedBtnHistory)
 END_MESSAGE_MAP()
 
 
@@ -662,5 +665,64 @@ void CMFCApplication1Dlg::OnBnClickedBtnCrack()
         m_strEvaluation += _T("\n\n") + m_strDbStatus;
     }
     catch (const std::exception& e) { AfxMessageBox(CString(e.what()), MB_ICONERROR); }
+    UpdateData(FALSE);
+}
+
+void CMFCApplication1Dlg::OnBnClickedBtnHistory()
+{
+    if (!m_db.IsConnected())
+    {
+        m_strHistory = _T("БД не подключена.");
+        UpdateData(FALSE);
+        return;
+    }
+
+    // Все столбцы приводятся к VARCHAR — QueryRows работает со строковыми полями.
+    static const std::string sql =
+        "SELECT FIRST 50 "
+        "CAST(O.ID AS VARCHAR(10)), "
+        "U.USERNAME, "
+        "SF.FILENAME, "
+        "O.OPERATIONTYPE, "
+        "CAST(O.SHIFTKEY AS VARCHAR(10)), "
+        "CAST(O.OPERATIONDATE AS VARCHAR(30)), "
+        "CAST(CA.FOUNDSHIFT AS VARCHAR(10)), "
+        "CAST(CA.FITNESSSCORE AS VARCHAR(20)) "
+        "FROM ENCRYPTIONOPERATIONS O "
+        "JOIN SOURCEFILES SF ON SF.ID = O.FILEID "
+        "JOIN USERS U ON U.ID = SF.USERID "
+        "LEFT JOIN CRACKANALYSIS CA ON CA.OPERATIONID = O.ID "
+        "ORDER BY O.ID DESC";
+
+    std::vector<std::vector<std::string>> rows;
+    std::string error;
+    if (!m_db.QueryRows(sql, rows, error))
+    {
+        ShowDbError(error);
+        m_strHistory = ToCStr("Ошибка чтения истории: " + error);
+        UpdateData(FALSE);
+        return;
+    }
+
+    CString history;
+    history += _T("ID | Пользователь | Файл | Операция | Сдвиг | Дата | Найден | Fitness\r\n");
+    history += _T("----------------------------------------------------------------------\r\n");
+
+    for (const auto& row : rows)
+    {
+        if (row.size() < 8) continue;
+
+        history += ToCStr(row[0]) + _T(" | ") +
+                   ToCStr(row[1]) + _T(" | ") +
+                   ToCStr(row[2]) + _T(" | ") +
+                   ToCStr(row[3]) + _T(" | ") +
+                   ToCStr(row[4]) + _T(" | ") +
+                   ToCStr(row[5]) + _T(" | ") +
+                   ToCStr(row[6]) + _T(" | ") +
+                   ToCStr(row[7]) + _T("\r\n");
+    }
+
+    m_strHistory = history;
+    m_strDbStatus = ToCStr("История загружена: " + std::to_string(rows.size()) + " записей");
     UpdateData(FALSE);
 }

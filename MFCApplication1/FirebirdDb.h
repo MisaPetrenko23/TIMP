@@ -45,6 +45,12 @@ public:
                      std::string& value,
                      std::string& error);
 
+    // Возвращает все строки результата. Все столбцы должны быть строковыми
+    // (в SQL это достигается через CAST(... AS VARCHAR)).
+    bool QueryRows(const std::string& sql,
+                   std::vector<std::vector<std::string>>& rows,
+                   std::string& error);
+
 private:
     isc_db_handle db_{ 0 };
     isc_tr_handle tr_{ 0 };

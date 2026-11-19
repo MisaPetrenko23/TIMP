@@ -500,3 +500,110 @@ bool FirebirdDb::QueryString(const std::string& sql,
     isc_dsql_free_statement(status_, &stmt, DSQL_drop);
     return Commit(error);
 }
+
+bool FirebirdDb::QueryRows(const std::string& sql,
+                           std::vector<std::vector<std::string>>& rows,
+                           std::string& error)
+{
+    rows.clear();
+
+    if (db_ == 0)
+    {
+        error = "БД не подключена";
+        return false;
+    }
+    if (!Begin(error)) return false;
+
+    isc_stmt_handle stmt = 0;
+    auto fail = [&](const std::string& message) -> bool
+    {
+        error = message;
+        if (stmt != 0) isc_dsql_free_statement(status_, &stmt, DSQL_drop);
+        Rollback();
+        return false;
+    };
+
+    if (isc_dsql_allocate_statement(status_, &db_, &stmt) != 0)
+        return fail("Ошибка выделения запроса: " + StatusMessage());
+
+    auto out = MakeSqlda(16);
+
+    if (isc_dsql_prepare(status_, &tr_, &stmt,
+                         static_cast<short>(sql.size()), sql.c_str(),
+                         3, out.get()) != 0)
+        return fail("Ошибка подготовки запроса: " + StatusMessage());
+
+    if (isc_dsql_describe(status_, &stmt, 1, out.get()) != 0)
+        return fail("Ошибка описания результата: " + StatusMessage());
+
+    const int cols = out->sqld;
+    if (cols < 1) return fail("Запрос не вернул ни одного столбца");
+
+    std::vector<short> indicators(cols, 0);
+    std::vector<std::vector<char>> buffers;
+    buffers.reserve(cols);
+
+    for (int i = 0; i < cols; ++i)
+    {
+        XSQLVAR& col = out->sqlvar[i];
+        const short baseType = col.sqltype & ~1;
+
+        if (baseType != SQL_VARYING && baseType != SQL_TEXT)
+            return fail("История операций: неподдерживаемый тип столбца");
+
+        const int dataLen = std::max<short>(col.sqllen, 1);
+        buffers.emplace_back(static_cast<size_t>(dataLen) + 2, 0);
+        col.sqlind = &indicators[i];
+        col.sqldata = buffers.back().data();
+    }
+
+    if (isc_dsql_execute(status_, &tr_, &stmt, 1, nullptr) != 0)
+        return fail("Ошибка выполнения запроса: " + StatusMessage());
+
+    while (true)
+    {
+        ISC_STATUS rc = isc_dsql_fetch(status_, &stmt, 1, out.get());
+        if (rc == FETCH_END) break;
+        if (rc != 0) return fail(StatusMessage());
+
+        std::vector<std::string> row;
+        row.reserve(cols);
+
+        for (int i = 0; i < cols; ++i)
+        {
+            if (indicators[i] == -1)
+            {
+                row.emplace_back();
+                continue;
+            }
+
+            const short baseType = out->sqlvar[i].sqltype & ~1;
+            const char* data = buffers[i].data();
+
+            if (baseType == SQL_VARYING)
+            {
+                short len = 0;
+                std::memcpy(&len, data, sizeof(len));
+                len = static_cast<short>(std::min<size_t>(len, buffers[i].size() - 2));
+                row.emplace_back(data + 2, static_cast<size_t>(len));
+            }
+            else
+            {
+                std::string value(data);
+                while (!value.empty() &&
+                       (value.back() == ' ' || value.back() == '\0'))
+                    value.pop_back();
+                row.push_back(value);
+            }
+        }
+        rows.push_back(std::move(row));
+    }
+
+    if (isc_dsql_free_statement(status_, &stmt, DSQL_drop) != 0)
+    {
+        stmt = 0;
+        return fail("Ошибка освобождения запроса: " + StatusMessage());
+    }
+    stmt = 0;
+    return Commit(error);
+}

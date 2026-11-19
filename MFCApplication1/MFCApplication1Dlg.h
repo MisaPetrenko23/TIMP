@@ -39,12 +39,14 @@ public:
 	CString m_strCipherText;
 	CString m_strCrackedText;
 	CString m_strFilePath;
+	CString m_strHistory;
 	int m_nShift;
 	CString m_strEvaluation;
 	afx_msg void OnBnClickedBtnOpen();
 	afx_msg void OnBnClickedBtnEncrypt();
 	afx_msg void OnBnClickedBtnDecrypt();
 	afx_msg void OnBnClickedBtnCrack();
+	afx_msg void OnBnClickedBtnHistory();
 
 private:
 	// --- Подключение к RedDatabase / Firebird ---
